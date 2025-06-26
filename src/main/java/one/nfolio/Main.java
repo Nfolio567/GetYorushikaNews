@@ -1,19 +1,26 @@
 package one.nfolio;
 
+// import JavaStandardLibrary
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.time.LocalDate;
 import java.util.*;
 
+// import ListComparisonMethod
 import org.apache.commons.collections4.ListUtils;
+
+// import Logger
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+// import LINE Bot
 import com.linecorp.bot.messaging.client.MessagingApiClient;
 import com.linecorp.bot.messaging.model.BroadcastRequest;
 import com.linecorp.bot.messaging.model.Message;
 import com.linecorp.bot.messaging.model.TextMessage;
 
+// import Jsoup
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -28,14 +35,14 @@ public class Main {
         List<String> newsUrls = List.of("");
         List<String> diffNews = new ArrayList<>();
         boolean status = true;
-        Date date = null;
+        LocalDate date = null;
 
         while (true) {
-            Date yesterday = date;
+            LocalDate yesterday = date;
 
-            date = new Date();
+            date = LocalDate.now();
             try {
-                if (yesterday != null && date.after(yesterday)) {
+                if (yesterday == null || date.isAfter(yesterday)) {
                     // prepare scraping
                     Document document = Jsoup.connect("https://yorushika.com/news")
                             .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
@@ -57,13 +64,14 @@ public class Main {
                     boolean hasEmptyOldUrls = oldNewsUrls.stream().anyMatch(String::isEmpty);
 
                     // Get diff
-                    if ((oldNewsList != newsList && hasEmptyOldNews) || (oldNewsUrls != newsUrls && hasEmptyOldUrls)) {
+                    if ((oldNewsList != newsList && !hasEmptyOldNews) || (oldNewsUrls != newsUrls && !hasEmptyOldUrls)) {
                         List<String> bufferDiffNewsList = new ArrayList<>();
                         ListUtils.subtract(newsList, oldNewsList).forEach(i -> bufferDiffNewsList.add(i.getFirst()));
 
                         List<String> bufferDiffNewsUrls = new ArrayList<>(ListUtils.subtract(newsUrls, oldNewsUrls));
                         diffNews = bufferDiffNewsList;
                         diffNews.addAll(bufferDiffNewsUrls);
+                        logger.info("buffer: {}\nnew: {}\nold: {}\nhasEmpty: {}, debug", bufferDiffNewsList, newsList, oldNewsList, hasEmptyOldNews);
                     }
 
                     String channelAccessToken = "";
@@ -78,7 +86,6 @@ public class Main {
 
                     SendMessage sendMessage = new SendMessage(channelAccessToken, logger);
                     if (status) {
-                        System.out.println(newsList);
                         StringBuilder message = new StringBuilder();
                         for (List<String> i : newsList) {
                             message.append(String.format("%s : %s\n - %s\n| %s\n", i.getFirst(), i.get(1), i.get(2), i.get(3)));
@@ -86,7 +93,7 @@ public class Main {
                         sendMessage.pushMessage(message.toString());
                         status = false;
                     } else {
-                        if (diffNews.isEmpty()) {// TODO: なんかisEmptyじゃない今、直さなきゃいけん
+                        if (!diffNews.isEmpty()) {
                             sendMessage.pushMessage(String.format("%s : %s\n - %s\n| %s\n", diffNews.getFirst(), diffNews.get(1), diffNews.get(2), diffNews.get(3)));
                         }
                     }
