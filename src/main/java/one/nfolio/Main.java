@@ -4,6 +4,10 @@ package one.nfolio;
 import java.io.*;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 // import ListComparisonMethod
@@ -30,64 +34,69 @@ import org.jsoup.select.Elements;
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
         final AtomicReference<List<YorushikaNewsItem>> newsList = new AtomicReference<>(List.of());
         final AtomicReference<List<YorushikaNewsItem>> diffNews = new AtomicReference<>(List.of());
-        final boolean[] status = {true};
+        final AtomicBoolean status = new AtomicBoolean(true);
         final AtomicReference<LocalDate> date = new AtomicReference<>(null);
+        final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-        for (;;){
-            logger.info("do");
-            LocalDate yesterday = date.get();
+        try{
+            scheduler.scheduleAtFixedRate(() -> {
+                logger.info("do");
+                LocalDate yesterday = date.get();
 
-            date.set(LocalDate.now());
-            if (yesterday == null || date.get().isAfter(yesterday)) {
+                date.set(LocalDate.now());
+                if (yesterday == null || date.get().isAfter(yesterday)) {
 
-                // prepare scraping
-                Document document = null;
-                try {
-                    document = Jsoup.connect("https://yorushika.com/news")
-                            .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-                            .get();// GET
-                } catch (IOException e) {
-                    logger.warn(e.toString());
-                }
-                Elements elements = Objects.requireNonNull(document).select(".list--news > *");
-
-                // Get some Yorushika News
-                GetYorushikaNews getNews = new GetYorushikaNews(elements, logger);
-                List<YorushikaNewsItem> oldNewsList = newsList.get();
-                newsList.set(getNews.newsList());
-
-                // Old***が空文字リストかどうか（初回起動かどうか）
-                boolean hasEmptyOldNews = oldNewsList.isEmpty();
-                logger.info("oldNews is: {}", hasEmptyOldNews);
-
-                // Get diff
-                if ((oldNewsList.equals(newsList.get()) && !hasEmptyOldNews)) {
-                    List<YorushikaNewsItem> bufferDiffNewsList = new ArrayList<>(ListUtils.subtract(newsList.get(), oldNewsList));
-
-                    diffNews.set(bufferDiffNewsList);
-                    logger.info("buffer: {}\nnew: {}\nold: {}\nhasEmpty: {}, debug", bufferDiffNewsList, newsList.get(), oldNewsList, hasEmptyOldNews);
-                }
-
-                String channelAccessToken = System.getenv("SEND_YORUSHIKA_NEWS_CHANNEL_ACCESS_TOKEN");
-
-                SendMessage sendMessage = new SendMessage(channelAccessToken, logger);
-                if (status[0]) {
-                    StringBuilder message = new StringBuilder();
-                    for (YorushikaNewsItem i : newsList.get()) {
-                        message.append(String.format("%s : %s\n - %s\n| %s\n", i.date, i.category, i.title, i.url));
+                    // prepare scraping
+                    Document document = null;
+                    try {
+                        document = Jsoup.connect("https://yorushika.com/news")
+                                .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+                                .get();// GET
+                    } catch (IOException e) {
+                        logger.warn(e.toString());
                     }
-                    sendMessage.pushMessage(message.toString());
-                    status[0] = false;
-                } else {
-                    if (!diffNews.get().isEmpty()) {
-                        sendMessage.pushMessage(String.format("%s : %s\n - %s\n| %s\n", diffNews.get().getFirst(), diffNews.get().get(1), diffNews.get().get(2), diffNews.get().get(3)));
+                    Elements elements = Objects.requireNonNull(document).select(".list--news > *");
+
+                    // Get some Yorushika News
+                    GetYorushikaNews getNews = new GetYorushikaNews(elements, logger);
+                    List<YorushikaNewsItem> oldNewsList = newsList.get();
+                    newsList.set(getNews.newsList());
+
+                    // Old***が空文字リストかどうか（初回起動かどうか）
+                    boolean hasEmptyOldNews = oldNewsList.isEmpty();
+                    logger.info("oldNews is: {}", hasEmptyOldNews);
+
+                    // Get diff
+                    if ((oldNewsList.equals(newsList.get()) && !hasEmptyOldNews)) {
+                        List<YorushikaNewsItem> bufferDiffNewsList = new ArrayList<>(ListUtils.subtract(newsList.get(), oldNewsList));
+
+                        diffNews.set(bufferDiffNewsList);
+                        logger.info("buffer: {}\nnew: {}\nold: {}\nhasEmpty: {}, debug", bufferDiffNewsList, newsList.get(), oldNewsList, hasEmptyOldNews);
+                    }
+
+                    String channelAccessToken = System.getenv("SEND_YORUSHIKA_NEWS_CHANNEL_ACCESS_TOKEN");
+
+                    SendMessage sendMessage = new SendMessage(channelAccessToken, logger);
+                    if (status.get()) {
+                        StringBuilder message = new StringBuilder();
+                        for (YorushikaNewsItem i : newsList.get()) {
+                            message.append(String.format("%s : %s\n - %s\n| %s\n", i.date, i.category, i.title, i.url));
+                        }
+                        sendMessage.pushMessage(message.toString());
+                        status.set(false);
+                    } else {
+                        if (!diffNews.get().isEmpty()) {
+                            sendMessage.pushMessage(String.format("%s : %s\n - %s\n| %s\n", diffNews.get().getFirst(), diffNews.get().get(1), diffNews.get().get(2), diffNews.get().get(3)));
+                        }
                     }
                 }
-            }
-            Thread.sleep(60000);
+            }, 0, 1, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            logger.error("Can't start Scheduler", e);
+            scheduler.close();
         }
     }
 }
