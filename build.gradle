@@ -1,10 +1,16 @@
 plugins {
     id 'java'
     id 'application'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 group = 'one.nfolio'
 version = '1.0-SNAPSHOT'
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(23)
+    }
+}
 
 repositories {
     mavenCentral()
@@ -24,6 +30,14 @@ dependencies {
 
 application {
     mainClass = 'one.nfolio.Main'
+}
+
+jar {
+    manifest {
+        attributes(
+                'Main-Class': 'one.nfolio.Main'
+        )
+    }
 }
 
 test {
