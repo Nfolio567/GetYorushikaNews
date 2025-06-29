@@ -1,0 +1,34 @@
+name: Build to Linux
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Cloning repogitory...
+        uses: actions/checkout@v4
+
+      - name: Setup Java 23
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 23
+
+      - name: Grant execute permissions to Gradle
+        run: chmod +x ./gradlew
+
+      - name: Build jlink runtime image
+        run: ./gradlew clean jlink --no-daemon
+
+      - name: Archive jlink runtime
+        run: zip -r yorushika-linux.zip build/image
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yorushika-linux
+          path: yorushika-linux.zip
