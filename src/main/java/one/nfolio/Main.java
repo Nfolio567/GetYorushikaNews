@@ -29,15 +29,16 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+
 //TIP コードを<b>実行</b>するには、<shortcut actionId="Run"/> を押すか
 // ガターの <icon src="AllIcons.Actions.Execute"/> アイコンをクリックします。
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
-        final AtomicReference<List<YorushikaNewsItem>> newsList = new AtomicReference<>(List.of());
-        final AtomicReference<List<YorushikaNewsItem>> diffNews = new AtomicReference<>(List.of());
-        final AtomicBoolean status = new AtomicBoolean(true);
+        final AtomicReference<List<YorushikaNewsItem>> newsList = new AtomicReference<>(List.of()); // List of latest Yorushika NEWS (initially empty)
+        final AtomicReference<List<YorushikaNewsItem>> diffNews = new AtomicReference<>(List.of()); // Difference between of new NEWS and old Yorushika NEWS
+        final AtomicBoolean status = new AtomicBoolean(true); // first run or since then
         final AtomicReference<LocalDate> date = new AtomicReference<>(null);
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
         final AtomicReference<String> channelAccessToken = new AtomicReference<>("");
@@ -67,7 +68,7 @@ public class Main {
                     newsList.set(getNews.newsList());
                     logger.info("newList is: {}", newsList.get());
 
-                    // Old***が空文字リストかどうか（初回起動かどうか）
+                    // oldNewsListが空リストかどうか（=初回起動かどうか）
                     boolean hasEmptyOldNews = oldNewsList.isEmpty();
                     logger.info("oldNews is: {}", hasEmptyOldNews);
 
@@ -79,6 +80,7 @@ public class Main {
                         logger.info("buffer: {}\nnew: {}\nold: {}\nhasEmpty: {}, debug", bufferDiffNewsList, newsList.get(), oldNewsList, hasEmptyOldNews);
                     }
 
+                    // get "Channel Access Token" from .env file
                     try (InputStream input = Main.class.getClassLoader().getResourceAsStream(".env")) {
                         Properties property = new Properties();
                         property.load(input);
@@ -88,15 +90,16 @@ public class Main {
                         logger.error("Failed not found .env", e);
                     }
 
+                    // send Yorushika News to LINE
                     SendMessage sendMessage = new SendMessage(channelAccessToken.get(), logger);
                     StringBuilder message = new StringBuilder();
-                    if (status.get()) {
+                    if (status.get()) { // first
                         for (YorushikaNewsItem i : newsList.get()) {
                             message.append(String.format("%s : %s\n - %s\n| %s\n", i.date, i.category, i.title, i.url));
                         }
                         sendMessage.pushMessage(message.toString());
                         status.set(false);
-                    } else if (!diffNews.get().isEmpty()) {
+                    } else if (!diffNews.get().isEmpty()) { //second or later
                         for (YorushikaNewsItem i : diffNews.get()) {
                             message.append(String.format("%s : %s\n - %s\n| %s\n", i.date, i.category, i.title, i.url));
                         }
@@ -112,7 +115,7 @@ public class Main {
 }
 
 
-class YorushikaNewsItem {
+class YorushikaNewsItem { // // Data type representing a single Yorushika NEWS item
     String date;
     String category;
     String title;
@@ -158,14 +161,29 @@ class GetYorushikaNews {
         this.logger = logger;
     }
 
-    List<YorushikaNewsItem> newsList() {
+    List<YorushikaNewsItem> newsList() { // Extracts and returns a list of Yorushika NEWS items from HTML elements
         List<YorushikaNewsItem> allNewsElements = new ArrayList<>();
         try {
             for (Element element : elements) {
-                final String newsDate = element.childNode(1).childNode(1).childNode(0).toString().replaceAll("^\\[", "").replaceAll("\\]$", "");
-                final String newsCategory = element.childNode(1).childNode(1).childNode(1).childNodes().toString().replaceAll("^\\[", "").replaceAll("\\]$", "");
-                final String newsTitle = element.childNode(1).childNode(3).childNodes().toString().replaceAll("^\\[", "").replaceAll("\\]$", "");
-                final String newsUrl = element.childNode(1).absUrl("href");
+                final String newsDate = element
+                        .childNode(1)
+                        .childNode(1)
+                        .childNode(0)
+                        .toString().replaceAll("^\\[", "").replaceAll("\\]$", "");
+                final String newsCategory = element
+                        .childNode(1)
+                        .childNode(1)
+                        .childNode(1)
+                        .childNodes()
+                        .toString().replaceAll("^\\[", "").replaceAll("\\]$", "");
+                final String newsTitle = element
+                        .childNode(1)
+                        .childNode(3)
+                        .childNodes()
+                        .toString().replaceAll("^\\[", "").replaceAll("\\]$", "");
+                final String newsUrl = element
+                        .childNode(1)
+                        .absUrl("href");
 
                 allNewsElements.add(new YorushikaNewsItem(newsDate, newsCategory, newsTitle, newsUrl));
             }
