@@ -40,6 +40,7 @@ public class Main {
         final AtomicBoolean status = new AtomicBoolean(true);
         final AtomicReference<LocalDate> date = new AtomicReference<>(null);
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        final AtomicReference<String> channelAccessToken = new AtomicReference<>("");
 
         try{
             scheduler.scheduleAtFixedRate(() -> {
@@ -53,10 +54,10 @@ public class Main {
                     Document document = null;
                     try {
                         document = Jsoup.connect("https://yorushika.com/news")
-                                .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+                                .userAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.1 Safari/605.1.15")
                                 .get();// GET
                     } catch (IOException e) {
-                        logger.warn(e.toString());
+                        logger.error("Failed get the page", e);
                     }
                     Elements elements = Objects.requireNonNull(document).select(".list--news > *");
 
@@ -64,38 +65,47 @@ public class Main {
                     GetYorushikaNews getNews = new GetYorushikaNews(elements, logger);
                     List<YorushikaNewsItem> oldNewsList = newsList.get();
                     newsList.set(getNews.newsList());
+                    logger.info("newList is: {}", newsList.get());
 
                     // Old***が空文字リストかどうか（初回起動かどうか）
                     boolean hasEmptyOldNews = oldNewsList.isEmpty();
                     logger.info("oldNews is: {}", hasEmptyOldNews);
 
                     // Get diff
-                    if ((oldNewsList.equals(newsList.get()) && !hasEmptyOldNews)) {
-                        List<YorushikaNewsItem> bufferDiffNewsList = new ArrayList<>(ListUtils.subtract(newsList.get(), oldNewsList));
+                    if (!oldNewsList.equals(newsList.get()) && !hasEmptyOldNews) {
+                        List<YorushikaNewsItem> bufferDiffNewsList = ListUtils.subtract(newsList.get(), oldNewsList);
 
                         diffNews.set(bufferDiffNewsList);
                         logger.info("buffer: {}\nnew: {}\nold: {}\nhasEmpty: {}, debug", bufferDiffNewsList, newsList.get(), oldNewsList, hasEmptyOldNews);
                     }
 
-                    String channelAccessToken = System.getenv("SEND_YORUSHIKA_NEWS_CHANNEL_ACCESS_TOKEN");
+                    try (InputStream input = Main.class.getClassLoader().getResourceAsStream(".env")) {
+                        Properties property = new Properties();
+                        property.load(input);
+                        channelAccessToken.set(property.getProperty("SEND_YORUSHIKA_NEWS_CHANNEL_ACCESS_TOKEN"));
+                        logger.info("ChannelAccessToken: {}", channelAccessToken);
+                    } catch (IOException e) {
+                        logger.error("Failed not found .env", e);
+                    }
 
-                    SendMessage sendMessage = new SendMessage(channelAccessToken, logger);
+                    SendMessage sendMessage = new SendMessage(channelAccessToken.get(), logger);
+                    StringBuilder message = new StringBuilder();
                     if (status.get()) {
-                        StringBuilder message = new StringBuilder();
                         for (YorushikaNewsItem i : newsList.get()) {
                             message.append(String.format("%s : %s\n - %s\n| %s\n", i.date, i.category, i.title, i.url));
                         }
                         sendMessage.pushMessage(message.toString());
                         status.set(false);
-                    } else {
-                        if (!diffNews.get().isEmpty()) {
-                            sendMessage.pushMessage(String.format("%s : %s\n - %s\n| %s\n", diffNews.get().getFirst(), diffNews.get().get(1), diffNews.get().get(2), diffNews.get().get(3)));
+                    } else if (!diffNews.get().isEmpty()) {
+                        for (YorushikaNewsItem i : diffNews.get()) {
+                            message.append(String.format("%s : %s\n - %s\n| %s\n", i.date, i.category, i.title, i.url));
                         }
+                        sendMessage.pushMessage(message.toString());
                     }
                 }
             }, 0, 1, TimeUnit.MINUTES);
         } catch (Exception e) {
-            logger.error("Can't start Scheduler", e);
+            logger.error("Failed start Scheduler", e);
             scheduler.close();
         }
     }
@@ -113,6 +123,28 @@ class YorushikaNewsItem {
         this.category = category;
         this.title = title;
         this.url = url;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("Date: %s, Category: %s, title: %s, URL: %s", date, category, title, url);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(date, category, title, url);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return  false;
+
+        YorushikaNewsItem other = (YorushikaNewsItem) obj;
+        return Objects.equals(date, other.date) &&
+                Objects.equals(category, other.category) &&
+                Objects.equals(title, other.title) &&
+                Objects.equals(url, other.url);
     }
 }
 
@@ -138,7 +170,7 @@ class GetYorushikaNews {
                 allNewsElements.add(new YorushikaNewsItem(newsDate, newsCategory, newsTitle, newsUrl));
             }
         }catch (Exception e) {
-            logger.warn(e.toString());
+            logger.error("Failed to parse the HTML content.", e);
         }
         return allNewsElements;
     }
@@ -156,10 +188,14 @@ class SendMessage {
     }
 
     void pushMessage(String rawMessage) {
-        List<Message> message = List.of(new TextMessage(rawMessage));
-        BroadcastRequest request = new BroadcastRequest(message, false);
-        UUID uuid = UUID.randomUUID();
-        client.broadcast(uuid, request);
-        logger.info("UUID: {}", uuid);
+        try {
+            List<Message> message = List.of(new TextMessage(rawMessage));
+            BroadcastRequest request = new BroadcastRequest(message, false);
+            UUID uuid = UUID.randomUUID();
+            client.broadcast(uuid, request);
+            logger.info("UUID: {}", uuid);
+        } catch (Exception e) {
+            logger.error("Can't push message", e);
+        }
     }
 }
